@@ -1,5 +1,5 @@
 services:
-  # Step-CA - Private ACME Certificate Authority
+    # Step-CA - Private ACME Certificate Authority
   step-ca:
     image: smallstep/step-ca:latest
     container_name: step-ca
@@ -39,7 +39,7 @@ services:
       - "3478:3478/udp" # UDP
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./step-ca-data/certs/root_ca.crt:/certs/root_ca.crt:ro
+      - ./step-ca-data/certs:/certs:ro
       - traefik-certs:/certificates
     environment:
       # Trust the step-ca root certificate

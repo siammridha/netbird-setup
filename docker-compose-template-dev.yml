@@ -39,14 +39,14 @@ services:
       - "3478:3478/udp" # UDP
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./step-ca-data/certs/root_ca.crt:/certs/root_ca.crt:ro
+      - ./step-ca-data/certs:/certs:ro
       - traefik-certs:/certificates
     environment:
       # Trust the step-ca root certificate
       - LEGO_CA_CERTIFICATES=/certs/root_ca.crt
     command:
       # Enable API and Dashboard
-      - --api.dashboard=true
+      - --api.dashboard=false
 
       # Logging
       - --log.level=DEBUG
