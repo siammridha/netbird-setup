@@ -62,7 +62,7 @@ unzip -o netbird-setup.zip
 # copy all files to netbird-setup
 mv netbird-setup-main netbird-setup
 #clean up the ZIP file
-rm -r netbird-setup-main netbird-setup.zip
+rm netbird-setup.zip
 
 echo "🎉 Script complete!"
 chmod +x netbird-setup/netbird-deploy.sh
