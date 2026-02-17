@@ -401,52 +401,58 @@ restore_step_ca_data_or_init() {
     fi
 }
 
+get_template() {
+    local template="$1"
+    local local_file="${SCRIPT_DIR}/${template}"
+    local gir_repo="https://raw.githubusercontent.com/siammridha/netbird-setup/main"
+
+    if [[ -f "$local_file" ]]; then
+        cat "$local_file"
+    else
+        info "${YELLOW}Using remote ${template}"  >&2
+        wget -qO- "${gir_repo}/${template}"
+    fi
+}
+
 generate_relay_env() {
-    local realy_dir="${SCRIPT_DIR}/relay-template.env"
     progress "Configuring Relay service from template..."
 
     # Substitute domain and auth secret placeholders in the relay template
-    if [[ -f ${realy_dir} ]]; then
-        sed -e "s|<DOMAIN>|${DOMAIN}|g" \
-            -e "s|<NB_AUTH_SECRET>|${NB_AUTH_SECRET}|g" \
-            ${realy_dir} > relay.env
-        success "relay.env generated from template"
-    else
-        error "Relay template not found: ${realy_dir}"
-    fi
+    get_template "relay-template.env" | \
+    sed -e "s|<DOMAIN>|${DOMAIN}|g" \
+        -e "s|<NB_AUTH_SECRET>|${NB_AUTH_SECRET}|g" > relay.env
+    success "relay.env generated from template"
 }
 
 generate_dashboard_env() {
-    local dashboard_dir="${SCRIPT_DIR}/dashboard-template.env"
     progress "Configuring Dashboard OIDC settings from template..."
 
     # Substitute domain, auth secret, and datastore key placeholders in the dashboard template
-    if [[ -f ${dashboard_dir} ]]; then
-        sed -e "s|<DOMAIN>|${DOMAIN}|g" \
-            -e "s|<NB_AUTH_SECRET>|${NB_AUTH_SECRET}|g" \
-            -e "s|<DATASTORE_KEY>|${DATASTORE_KEY}|g" \
-            ${dashboard_dir} > dashboard.env
-        success "dashboard.env generated from template"
-    else
-        error "Dashboard template not found: ${dashboard_dir}"
-    fi
+    get_template "dashboard-template.env" | \
+    sed -e "s|<DOMAIN>|${DOMAIN}|g" > dashboard.env
+    success "dashboard.env generated from template"
 }
 
 generate_management_config() {
-    local management_dir="${SCRIPT_DIR}/management-template.json"
     progress "Generating Management service config from template..."
 
     # Substitute domain, auth secret, and datastore key placeholders in the management template
-    if [[ -f ${management_dir} ]]; then
-        mkdir -p management
-        sed -e "s|<DOMAIN>|${DOMAIN}|g" \
-            -e "s|<NB_AUTH_SECRET>|${NB_AUTH_SECRET}|g" \
-            -e "s|<DATASTORE_KEY>|${DATASTORE_KEY}|g" \
-            ${management_dir} > ./management/config.json
-        success "management/config.json generated from template"
-    else
-        error "Management template not found: ${management_dir}"
-    fi
+    mkdir -p management
+    get_template "management-template.json" | \
+    sed -e "s|<DOMAIN>|${DOMAIN}|g" \
+        -e "s|<NB_AUTH_SECRET>|${NB_AUTH_SECRET}|g" \
+        -e "s|<DATASTORE_KEY>|${DATASTORE_KEY}|g" > ./management/config.json
+    success "management/config.json generated from template"
+}
+
+generate_docker_compose_yml() {
+    local mode=$([[ "${DEPLOYMENT_MODE:-}" == "--prod" ]] && echo "prod" || echo "dev")
+    progress "Generating docker-compose.yml with from template..."
+    
+    # Replace the <DOMAIN> placeholder throughout docker-compose.yml with the target domain
+    get_template "docker-compose-template-${mode}.yml" | \
+    sed -e "s|<DOMAIN>|${DOMAIN}|g" > docker-compose.yml
+    success "docker-compose.yml generated from template"
 }
 
 restore_management_data_if_any() {
@@ -462,38 +468,6 @@ restore_management_data_if_any() {
         else
             warn "No Management data found in backup archive — starting with an empty data directory"
         fi
-    fi
-}
-
-select_docker_compose_template() {
-    # Copy the appropriate docker-compose template based on the chosen deployment mode
-    if [[ "${DEPLOYMENT_MODE:-}" == "--prod" ]]; then
-        info "Using production docker-compose template"
-        local prod_docker_compose="${SCRIPT_DIR}/docker-compose-template-prod.yml"
-        if [[ -f "${prod_docker_compose}" ]]; then
-            cp ${prod_docker_compose} docker-compose.yml
-        else
-            warn "Production template not found: ${prod_docker_compose}"
-        fi
-    else
-        info "Using development docker-compose template"
-        local dev_docker_compose="${SCRIPT_DIR}/docker-compose-template-dev.yml"
-        if [[ -f "${dev_docker_compose}" ]]; then
-            cp ${dev_docker_compose} docker-compose.yml
-        else
-            warn "Development template not found: ${dev_docker_compose}"
-        fi
-    fi
-}
-
-update_docker_compose_domain() {
-    # Replace the <DOMAIN> placeholder throughout docker-compose.yml with the target domain
-    progress "Updating docker-compose.yml with target domain..."
-    if [[ -f docker-compose.yml ]]; then
-        sed -i "s|<DOMAIN>|${DOMAIN}|g" docker-compose.yml
-        success "Docker Compose domain updated"
-    else
-        warn "docker-compose.yml not found — domain substitution skipped"
     fi
 }
 
@@ -582,10 +556,7 @@ setup() {
     generate_relay_env
     generate_dashboard_env
     generate_management_config
-
-    # Copy and configure the docker-compose file for the chosen deployment mode
-    select_docker_compose_template
-    update_docker_compose_domain
+    generate_docker_compose_yml
 
     # Restore Step CA data from backup or initialize a new CA instance
     restore_step_ca_data_or_init "$selected_backup" "${backup_contents:-}"
