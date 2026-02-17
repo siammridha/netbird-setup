@@ -594,7 +594,7 @@ setup() {
     restore_management_data_if_any "$selected_backup" "${backup_contents:-}"
 
     # Uncomment to bring services up immediately after configuration
-    # bring_up_services
+    bring_up_services
 }
 
 # =============================================================================
@@ -615,7 +615,6 @@ backup_data() {
     # Create a compressed archive; excludes ephemeral Step CA directories to keep size small
     tar -czf "${BAACKUP_FILE}" \
     --exclude='step-ca-data/db' \
-    --exclude='step-ca-data/secrets' \
     --exclude='step-ca-data/templates' \
     step-ca-data secrets management/data 2>/dev/null || true
 
@@ -635,7 +634,7 @@ export_root_ca_if_present() {
     local root_ca_dir="${SETUP_DIR}/step-ca-data/certs/root_ca.crt"
     # Confirm the root CA certificate is accessible for client trust configuration
     if [[ -f "${root_ca_dir}" ]]; then
-        success "Root CA certificate available at: ${root_ca_dir}"
+        success "📜 Root CA certificate available at: ${root_ca_dir}"
     fi
 }
 
