@@ -335,8 +335,8 @@ restore_secrets_or_generate() {
 init_step_ca() {
     # Create the Step CA data directory with the correct ownership for the container user
     progress "Initializing Step CA environment..."
-    sudo mkdir -p step-ca-data
-    sudo chown -R 1000:1000 step-ca-data
+    mkdir -p step-ca-data
+    chown -R 1000:1000 step-ca-data
     success "Step CA directories prepared"
 
     # Start the Step CA container so it can self-initialize
@@ -647,9 +647,8 @@ print_service_status() {
 print_access_info() {
     echo -e "${CYAN}  🌐 ACCESS PORTAL${NC}"
     echo -e "${BLUE}    Dashboard:          https://${DOMAIN}${NC}"
-    if [[ "${DEPLOYMENT_MODE:-}" == "--dev" ]]; then
-        echo -e "${BLUE}    Traefik Dashboard:  https://traefik.${DOMAIN}${NC}"
-    fi
+    [ "${DEPLOYMENT_MODE:-}" == "--dev" ] && \
+    echo -e "${BLUE}    Traefik Dashboard:  https://traefik.${DOMAIN}${NC}"
     echo -e "${BLUE}    Management API:     https://${DOMAIN}/api${NC}\n"
 }
 
@@ -664,9 +663,10 @@ print_control_panel() {
 
 print_file_locations() {
     echo -e "${CYAN}  📁 CONFIGURATION FILES${NC}"
-    echo -e "${GRAY}    relay.env          → ./relay.env${NC}"
-    echo -e "${GRAY}    dashboard.env      → ./dashboard.env${NC}"
-    echo -e "${GRAY}    management.json    → ./management/config.json${NC}\n"
+    echo -e "${GRAY}    relay.env           → ./relay.env${NC}"
+    echo -e "${GRAY}    dashboard.env       → ./dashboard.env${NC}"
+    echo -e "${GRAY}    management.json     → ./management/config.json${NC}"
+    echo -e "${GRAY}    Root CA certificate → ${SETUP_DIR}/step-ca-data/certs/root_ca.crt${NC}\n"
 }
 
 print_backup_info() {
@@ -767,6 +767,7 @@ main() {
     print_logs_commant
 
     echo -e "${GREEN}  ✨ NetBird VPN is now ${MAGENTA}LIVE${GREEN} on ${MAGENTA}${DOMAIN}${GREEN}!${NC}"
+    echo -e "${YELLOW}  🔐 Be sure to trust the Root CA certificate on all clients to enable proper TLS operation.${NC}"
 
     # Uncomment the line below to stream initial service logs after deployment
     # tail_initial_logs
