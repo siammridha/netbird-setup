@@ -56,7 +56,14 @@ docker pull netbirdio/signal:latest
 
 # Running NetBird setup script
 echo "🎉 Clonning Netbird Setup repo..."
-git clone https://github.com/siammridha/netbird-setup.git
+wget https://github.com/siammridha/netbird-setup/archive/refs/heads/main.zip -O netbird-setup.zip
+# Unzip the ZIP file into the target directory
+unzip -o netbird-setup.zip
+# copy all files to netbird-setup
+mv netbird-setup-main netbird-setup
+#clean up the ZIP file
+rm -r netbird-setup-main netbird-setup.zip
 
 echo "🎉 Running NetBird setup script..."
-cd netbird-setup/netbird-deploy.sh
+chmod +x netbird-setup/netbird-deploy.sh
+./netbird-setup/netbird-deploy.sh
