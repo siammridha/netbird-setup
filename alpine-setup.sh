@@ -66,4 +66,4 @@ rm -r netbird-setup-main netbird-setup.zip
 
 echo "🎉 Running NetBird setup script..."
 chmod +x netbird-setup/netbird-deploy.sh
-./netbird-setup/netbird-deploy.sh
+bash -i ./netbird-setup/netbird-deploy.sh
