@@ -447,7 +447,7 @@ generate_management_config() {
 
 generate_docker_compose_yml() {
     local mode=$([[ "${DEPLOYMENT_MODE:-}" == "--prod" ]] && echo "prod" || echo "dev")
-    progress "Generating docker-compose.yml with from template..."
+    progress "Generating docker-compose.yml from ${mode} template..."
     
     # Replace the <DOMAIN> placeholder throughout docker-compose.yml with the target domain
     get_template "docker-compose-template-${mode}.yml" | \

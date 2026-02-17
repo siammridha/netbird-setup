@@ -67,4 +67,8 @@ docker pull netbirdio/signal:latest
 echo "🎉 Script complete!"
 # chmod +x netbird-setup/netbird-deploy.sh
 # echo "Run NetBird setup script: ./netbird-setup/netbird-deploy.sh"
-echo "Run NetBird setup script: wget -qO- https://raw.githubusercontent.com/siammridha/netbird-setup/main/netbird-deploy.sh | bash"
+
+echo "⬇️ Downloading NetBird Setup Script!"
+wget https://raw.githubusercontent.com/siammridha/netbird-setup/main/netbird-deploy.sh -O netbird-deploy.sh
+chmod +x netbird-deploy.sh
+echo "ℹ️ Run NetBird setup script: ./netbird-deploy.sh"
