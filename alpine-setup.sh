@@ -64,6 +64,6 @@ mv netbird-setup-main netbird-setup
 #clean up the ZIP file
 rm -r netbird-setup-main netbird-setup.zip
 
-echo "🎉 Running NetBird setup script..."
+echo "🎉 Script complete!"
 chmod +x netbird-setup/netbird-deploy.sh
-bash -i ./netbird-setup/netbird-deploy.sh
+echo "Run NetBird setup script: ./netbird-setup/netbird-deploy.sh"
