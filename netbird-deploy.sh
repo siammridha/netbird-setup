@@ -479,14 +479,14 @@ bring_up_services() {
 }
 
 find_backups() {
-    local backup_list selected_backup count choice idx file
+    local backup_list selected_backup="" count choice idx file
 
     # Search for the 5 most recent backup archives under /backups/
     backup_list=$(ls -1 /backups/netbird-backup-*.tar.gz 2>/dev/null | sort -r | head -n 5)
 
     # If no backups exist, return an empty string and skip the restore prompt
     if [ -z "$backup_list" ]; then
-        echo ""  # Return empty string — caller will treat this as "no backup"
+        echo "$selected_backup"  # Return empty string — caller will treat this as "no backup"
     else
         # List available backups to the terminal for the user to choose from
         echo -e "${YELLOW}📦 Available backups (5 most recent):${NC}" >&2
