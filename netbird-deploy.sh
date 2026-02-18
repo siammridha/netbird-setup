@@ -318,6 +318,7 @@ restore_secrets_or_generate() {
         progress "Restoring secrets from backup..."
         if [[ $(echo "${backup_contents}" | grep -c 'secrets/') -gt 0 ]]; then
             tar -xzf "${latest_backup}" secrets/ >/dev/null 2>&1
+            chmod -R 644 secrets
             success "Secrets restored from backup"
         else
             warn "No secrets directory found in backup archive — generating fresh secrets"
@@ -389,6 +390,7 @@ restore_step_ca_data_or_init() {
         progress "Restoring Step CA data from backup..."
         if [[ $(echo "${backup_contents}" | grep -c 'step-ca-data/') -gt 0 ]]; then
             tar -xzf "${latest_backup}" step-ca-data/ >/dev/null 2>&1
+            chown -R 1000:1000 step-ca-data
             success "Step CA data restored from backup"
             return
         else
@@ -464,6 +466,8 @@ restore_management_data_if_any() {
         progress "Restoring Management service data from backup..."
         if [[ $(echo "${backup_contents}" | grep -c 'management/data') -gt 0 ]]; then
             tar -xzf "${latest_backup}" management/data >/dev/null 2>&1
+            chmod -R 755 management/data
+            chmod -R 644 management/config.json
             success "Management data restored from backup"
         else
             warn "No Management data found in backup archive — starting with an empty data directory"
