@@ -13,7 +13,7 @@ echo "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main" > /etc/apk/repos
 echo "https://dl-cdn.alpinelinux.org/alpine/latest-stable/community" >> /etc/apk/repositories
 
 # Updating APK package index
-echo "🔄  Updating APK package index..."
+echo "🔄 Updating APK package index..."
 apk update
 
 # Upgrading installed packages
