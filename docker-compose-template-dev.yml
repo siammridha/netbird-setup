@@ -28,7 +28,13 @@ services:
   traefik:
     image: traefik:latest
     container_name: traefik
-    networks: [netbird]
+    networks:
+      netbird:
+        # Allows step-ca to resolve each service hostname to Traefik's IP
+        # inside Docker so it can reach port 443 for TLS-ALPN-01 validation.
+        aliases:
+          - <DOMAIN>
+          - traefik.<DOMAIN>
     restart: unless-stopped
     depends_on:
       step-ca:
