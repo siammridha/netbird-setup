@@ -73,7 +73,7 @@ services:
       - --certificatesresolvers.stepca.acme.storage=/certificates/acme.json
       - --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory
       # Certificate duration (optional)
-      - --certificatesresolvers.stepca.acme.certificatesduration=2160
+      # - --certificatesresolvers.stepca.acme.certificatesduration=2160
 
 # UI dashboard
   dashboard:
