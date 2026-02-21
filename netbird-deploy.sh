@@ -552,9 +552,10 @@ generate_docker_compose_yml() {
     local mode=$([[ "${DEPLOYMENT_MODE:-}" == "--prod" ]] && echo "prod" || echo "dev")
     progress "Generating docker-compose.yml from ${mode} template..."
     
-    # Replace the <DOMAIN> placeholder throughout docker-compose.yml with the target domain
+    # Replace the domain and certificate name placeholder throughout docker-compose template
     get_template "docker-compose-template-${mode}.yml" | \
-    sed -e "s|<DOMAIN>|${DOMAIN}|g" > docker-compose.yml
+    sed -e "s|<DOMAIN>|${DOMAIN}|g" \
+        -e "s|<CERT_NAME>|${CERT_NAME}|g" > docker-compose.yml
     success "docker-compose.yml generated from template"
 }
 
@@ -820,8 +821,9 @@ main() {
     show_main_banner
 
     # Determine deployment mode (--dev is the default if no argument is provided)
-    DEPLOYMENT_MODE=${1:---dev}
     CURRENT_DIR=$PWD
+    CERT_NAME="Sentry Vault"
+    DEPLOYMENT_MODE=${1:---dev}
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
     # Interactively collect deployment parameters from the user

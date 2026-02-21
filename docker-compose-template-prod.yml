@@ -10,7 +10,7 @@ services:
       - ./step-ca-data:/home/step
     environment:
       # Initialize step-ca with these settings on first run
-      - DOCKER_STEPCA_INIT_NAME=Netbird
+      - DOCKER_STEPCA_INIT_NAME=<CERT_NAME>
       - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca
       - DOCKER_STEPCA_INIT_PASSWORD_FILE=/run/secrets/step_ca_password
       - DOCKER_STEPCA_INIT_ACME=true
@@ -69,7 +69,7 @@ services:
 
       # Certificate resolver using step-ca
       - --certificatesresolvers.stepca.acme.tlschallenge=true
-      - --certificatesresolvers.stepca.acme.email=admin@netbird.<DOMAIN>
+      - --certificatesresolvers.stepca.acme.email=admin@<DOMAIN>
       - --certificatesresolvers.stepca.acme.storage=/certificates/acme.json
       - --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory
 
