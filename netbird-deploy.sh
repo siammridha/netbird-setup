@@ -45,6 +45,7 @@
 #   ./netbird-deployer.sh --dev           # Deploy with the dev template (default)
 #   ./netbird-deployer.sh --prod          # Deploy with the production template
 #   ./netbird-deployer.sh --backup        # Backup existing configuration only
+#   ./netbird-deployer.sh --update        # Pull latest images and restart all containers
 #   ./netbird-deployer.sh --help          # Show usage information
 #
 # 🔄 DEPLOYMENT MODES
@@ -128,6 +129,15 @@ show_success_banner() {
 ╚══════════════════════════════════════════════════════════════════════╝${NC}"
 }
 
+show_update_banner() {
+    echo -e "${CYAN}
+╓══════════════════════════════════════════════════════════════════════╖
+║                         🔄 UPDATE MODE                               ║
+║                  Pull Latest Images & Restart Services               ║
+╙══════════════════════════════════════════════════════════════════════╜
+${NC}"
+}
+
 # -----------------------------------------------------------------------------
 # LOGGING HELPERS
 # -----------------------------------------------------------------------------
@@ -173,6 +183,7 @@ ${GREEN}DEPLOYMENT MODES:${NC}
 
 ${GREEN}UTILITY COMMANDS:${NC}
   $0 --backup                ${GRAY}# Create a backup of the current configuration${NC}
+  $0 --update                ${GRAY}# Pull latest images and restart all containers${NC}
   $0 --help                  ${GRAY}# Show this help message${NC}
 
 ${GREEN}WORKFLOW:${NC}
@@ -188,6 +199,19 @@ ${GREEN}TEMPLATES:${NC}
   ${CYAN}--dev${NC}  → Uses docker-compose-template-dev.yml
   ${CYAN}--prod${NC} → Uses docker-compose-template-prod.yml
 
+${GREEN}UPDATE WORKFLOW (--update):${NC}
+  1. Stops and removes all running Docker containers
+  2. Pulls the latest versions of all NetBird service images
+  3. Restarts all services using the existing docker-compose.yml
+
+${GREEN}IMAGES UPDATED (--update):${NC}
+  ${GRAY}smallstep/step-ca:latest${NC}
+  ${GRAY}traefik:latest${NC}
+  ${GRAY}netbirdio/dashboard:latest${NC}
+  ${GRAY}netbirdio/signal:latest${NC}
+  ${GRAY}netbirdio/relay:latest${NC}
+  ${GRAY}netbirdio/management:latest${NC}
+
 ${GREEN}BACKUP LOCATION:${NC}
   /backups/netbird-backup-YYYYMMDD-HHMMSS.tar.gz
 
@@ -195,6 +219,7 @@ ${GREEN}EXAMPLES:${NC}
   $0                         ${GRAY}# Fully interactive deployment${NC}
   $0 --prod                  ${GRAY}# Production deployment${NC}
   $0 --backup                ${GRAY}# Backup current config only${NC}
+  $0 --update                ${GRAY}# Update all images and restart services${NC}
 "
 }
 
@@ -282,6 +307,84 @@ cleanup() {
     cleanup_docker_networks_volumes
     reset_configs_and_data
     echo
+}
+
+# =============================================================================
+# 🔄 UPDATE SYSTEM — Pull Latest Images & Restart Services
+# =============================================================================
+
+pull_latest_images() {
+    echo -e "${CYAN}  🐳 PULLING LATEST IMAGES${NC}\n"
+
+    failed=0
+
+    for image in \
+        "smallstep/step-ca:latest" \
+        "traefik:latest" \
+        "netbirdio/dashboard:latest" \
+        "netbirdio/signal:latest" \
+        "netbirdio/relay:latest" \
+        "netbirdio/management:latest"
+    do
+        progress "Pulling ${image}..."
+        if docker pull "${image}" >/dev/null 2>&1; then
+            success "Updated: ${image}"
+        else
+            warn "Failed to pull: ${image} — existing local image will be used"
+            failed=$((failed + 1))
+        fi
+    done
+
+    echo
+    if [ "$failed" -gt 0 ]; then
+        warn "${failed} image(s) could not be pulled — services may not be fully up to date"
+    else
+        success "All images pulled successfully"
+    fi
+    echo
+}
+
+restart_services() {
+    # Verify a docker-compose.yml exists before attempting to start services
+    if [[ ! -f "docker-compose.yml" ]]; then
+        error "docker-compose.yml not found in $PWD — cannot restart services.\n  Run a full deployment first or ensure you are in the correct directory."
+    fi
+
+    progress "Starting all services with updated images..."
+    docker compose up -d
+    sleep 3
+
+    echo
+    echo -e "${CYAN}  📊 SERVICE STATUS${NC}"
+    docker compose ps | cat
+    echo
+}
+
+update() {
+    show_update_banner
+
+    # Phase 1: Stop and remove all existing containers (preserves volumes/configs)
+    show_cleanup_banner
+    cleanup_docker_containers
+    echo
+
+    # Phase 2: Pull the latest versions of all service images
+    pull_latest_images
+
+    # Phase 3: Bring services back up with the freshly pulled images
+    restart_services
+
+    echo -e "${GREEN}
+╔══════════════════════════════════════════════════════════════════════╗
+║                      🎉 UPDATE COMPLETE!                             ║
+║                  ALL SERVICES RESTARTED WITH LATEST IMAGES           ║
+╚══════════════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    echo -e "${CYAN}  ⌨️  USEFUL COMMANDS${NC}"
+    echo -e "${GRAY}    📋 View Status:    docker compose ps${NC}"
+    echo -e "${GRAY}    📜 Follow Logs:    docker compose logs -f${NC}"
+    echo -e "${GRAY}    🛑 Stop Services:  docker compose down${NC}"
+    echo -e "${GRAY}    🔄 Full Redeploy:  $0${NC}\n"
 }
 
 # =============================================================================
@@ -633,6 +736,7 @@ print_control_panel() {
     echo -e "${GRAY}    📜 Follow Logs:               docker compose logs -f${NC}"
     echo -e "${GRAY}    🛑 Graceful Stop:             docker compose down${NC}"
     echo -e "${GRAY}    🔄 Full Redeploy:             $0${NC}"
+    echo -e "${GRAY}    🔄 Update Images:             $0 --update${NC}"
     echo -e "${GRAY}    📦 Backup Config and Data:    $0 --backup${NC}\n"
 }
 
@@ -701,6 +805,14 @@ main() {
     if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
         clear
         print_usage
+        exit 0
+    fi
+
+    if [[ "${1:-}" == "--update" ]]; then
+        # Update mode: stop containers, pull latest images, restart services
+        clear
+        show_main_banner
+        update
         exit 0
     fi
 
