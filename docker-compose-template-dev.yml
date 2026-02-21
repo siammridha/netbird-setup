@@ -12,7 +12,6 @@ services:
       # Initialize step-ca with these settings on first run
       - DOCKER_STEPCA_INIT_NAME=Netbird
       - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca
-      # Use Docker Secret for password
       - DOCKER_STEPCA_INIT_PASSWORD_FILE=/run/secrets/step_ca_password
       - DOCKER_STEPCA_INIT_ACME=true
     secrets:
@@ -30,54 +29,54 @@ services:
     container_name: traefik
     networks:
       netbird:
-        # Allows step-ca to resolve each service hostname to Traefik's IP
-        # inside Docker so it can reach port 443 for TLS-ALPN-01 validation.
+        # Single alias — Traefik receives all traffic for netbird.<DOMAIN>
         aliases:
-          - <DOMAIN>
-          - traefik.<DOMAIN>
+          - netbird.<DOMAIN>
     restart: unless-stopped
     depends_on:
       step-ca:
         condition: service_healthy
     ports:
-      - "80:80"  # HTTP
-      - "443:443" # HTTPS
-      - "3478:3478/udp" # UDP
+      - "80:80"         # HTTP → HTTPS redirect
+      - "443:443"       # Dashboard — netbird.<DOMAIN>:443
+      - "4478:4478"     # TCP — Management, Signal, Relay
+      - "4478:4478/udp" # UDP — STUN
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./step-ca-data/certs:/certs:ro
       - traefik-certs:/certificates
     environment:
-      # Trust the step-ca root certificate
       - LEGO_CA_CERTIFICATES=/certs/root_ca.crt
     command:
       # Enable API and Dashboard
-      - --api.dashboard=false
+      - --api.dashboard=true
 
       # Logging
       - --log.level=DEBUG
-      
+
       # Docker provider
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=netbird
 
-      # Entry points                                 
-      - --entrypoints.web.address=:80                
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.stun.address=:3478/udp
-                                                     
-      # HTTP to HTTPS redirect                      
+      # Entry points
+      - --entrypoints.web.address=:80               # HTTP redirect
+      - --entrypoints.websecure.address=:443         # Dashboard HTTPS
+      - --entrypoints.services.address=:4478         # TCP — Management / Signal / Relay
+      - --entrypoints.stun.address=:4478/udp         # UDP — STUN
+
+      # HTTP → HTTPS redirect
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      
+
       # Certificate resolver using step-ca
       - --certificatesresolvers.stepca.acme.tlschallenge=true
-      - --certificatesresolvers.stepca.acme.email=admin@<DOMAIN>
+      - --certificatesresolvers.stepca.acme.email=admin@netbird.<DOMAIN>
       - --certificatesresolvers.stepca.acme.storage=/certificates/acme.json
       - --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory
       # Certificate duration (optional)
       - --certificatesresolvers.stepca.acme.certificatesduration=2160
+      
     labels:
       - traefik.enable=true
       # Traefik Dashboard on port 8080
@@ -87,8 +86,7 @@ services:
       - traefik.http.routers.traefik.tls.certresolver=stepca
       - traefik.http.routers.traefik.service=api@internal
 
-
-# UI dashboard
+  # UI Dashboard — netbird.<DOMAIN>:443
   dashboard:
     image: netbirdio/dashboard:latest
     container_name: netbird-dashboard
@@ -103,10 +101,11 @@ services:
       - ./dashboard.env
     labels:
       - traefik.enable=true
-      - traefik.http.routers.netbird-dashboard.rule=Host(`<DOMAIN>`)
+      - traefik.http.routers.netbird-dashboard.rule=Host(`netbird.<DOMAIN>`)
       - traefik.http.routers.netbird-dashboard.entrypoints=websecure
       - traefik.http.routers.netbird-dashboard.tls=true
       - traefik.http.routers.netbird-dashboard.tls.certresolver=stepca
+      # Lowest priority — catch-all for :443
       - traefik.http.routers.netbird-dashboard.priority=1
       - traefik.http.services.netbird-dashboard.loadbalancer.server.port=80
     logging:
@@ -115,7 +114,7 @@ services:
         max-size: "500m"
         max-file: "2"
 
-  # Signal
+  # Signal — netbird.<DOMAIN>:4478 (routed by path)
   signal:
     image: netbirdio/signal:latest
     container_name: netbird-signal
@@ -128,16 +127,18 @@ services:
     networks: [netbird]
     labels:
       - traefik.enable=true
+
       # WebSocket router
-      - traefik.http.routers.netbird-signal-ws.rule=Host(`<DOMAIN>`) && PathPrefix(`/ws-proxy/signal`)
-      - traefik.http.routers.netbird-signal-ws.entrypoints=websecure
+      - traefik.http.routers.netbird-signal-ws.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/ws-proxy/signal`)
+      - traefik.http.routers.netbird-signal-ws.entrypoints=services
       - traefik.http.routers.netbird-signal-ws.tls=true
       - traefik.http.routers.netbird-signal-ws.tls.certresolver=stepca
       - traefik.http.routers.netbird-signal-ws.service=netbird-signal-ws
       - traefik.http.services.netbird-signal-ws.loadbalancer.server.port=80
+
       # gRPC router
-      - traefik.http.routers.netbird-signal-grpc.rule=Host(`<DOMAIN>`) && PathPrefix(`/signalexchange.SignalExchange/`)
-      - traefik.http.routers.netbird-signal-grpc.entrypoints=websecure
+      - traefik.http.routers.netbird-signal-grpc.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/signalexchange.SignalExchange/`)
+      - traefik.http.routers.netbird-signal-grpc.entrypoints=services
       - traefik.http.routers.netbird-signal-grpc.tls=true
       - traefik.http.routers.netbird-signal-grpc.tls.certresolver=stepca
       - traefik.http.routers.netbird-signal-grpc.service=netbird-signal-grpc
@@ -149,7 +150,7 @@ services:
         max-size: "500m"
         max-file: "2"
 
-  # Relay (includes embedded STUN server)
+  # Relay (includes embedded STUN server) — netbird.<DOMAIN>:4478 (routed by path)
   relay:
     image: netbirdio/relay:latest
     container_name: netbird-relay
@@ -162,23 +163,25 @@ services:
       - ./relay.env
     labels:
       - traefik.enable=true
-      # HTTP relay
-      - traefik.http.routers.netbird-relay.rule=Host(`<DOMAIN>`) && PathPrefix(`/relay`)
-      - traefik.http.routers.netbird-relay.entrypoints=websecure
+
+      # HTTP relay (TCP :4478)
+      - traefik.http.routers.netbird-relay.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/relay`)
+      - traefik.http.routers.netbird-relay.entrypoints=services
       - traefik.http.routers.netbird-relay.tls=true
       - traefik.http.routers.netbird-relay.tls.certresolver=stepca
       - traefik.http.services.netbird-relay.loadbalancer.server.port=80
-      # UDP STUN
-      - traefik.udp.routers.netbird-relay.entrypoints=stun
-      - traefik.udp.routers.netbird-relay.service=netbird-relay
-      - traefik.udp.services.netbird-relay.loadbalancer.server.port=3478
+
+      # UDP STUN (UDP :4478 → container :3478)
+      - traefik.udp.routers.netbird-relay-udp.entrypoints=stun
+      - traefik.udp.routers.netbird-relay-udp.service=netbird-relay-udp
+      - traefik.udp.services.netbird-relay-udp.loadbalancer.server.port=3478
     logging:
       driver: "json-file"
       options:
         max-size: "500m"
         max-file: "2"
 
-  # Management (includes embedded IdP)
+  # Management (includes embedded IdP) — netbird.<DOMAIN>:4478 (routed by path)
   management:
     image: netbirdio/management:latest
     container_name: netbird-management
@@ -203,31 +206,35 @@ services:
     ]
     labels:
       - traefik.enable=true
+
       # API router
-      - traefik.http.routers.netbird-api.rule=Host(`<DOMAIN>`) && PathPrefix(`/api`)
-      - traefik.http.routers.netbird-api.entrypoints=websecure
+      - traefik.http.routers.netbird-api.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/api`)
+      - traefik.http.routers.netbird-api.entrypoints=services
       - traefik.http.routers.netbird-api.tls=true
       - traefik.http.routers.netbird-api.tls.certresolver=stepca
       - traefik.http.routers.netbird-api.service=netbird-api
       - traefik.http.services.netbird-api.loadbalancer.server.port=80
+
       # Management WebSocket router
-      - traefik.http.routers.netbird-mgmt-ws.rule=Host(`<DOMAIN>`) && PathPrefix(`/ws-proxy/management`)
-      - traefik.http.routers.netbird-mgmt-ws.entrypoints=websecure
+      - traefik.http.routers.netbird-mgmt-ws.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/ws-proxy/management`)
+      - traefik.http.routers.netbird-mgmt-ws.entrypoints=services
       - traefik.http.routers.netbird-mgmt-ws.tls=true
       - traefik.http.routers.netbird-mgmt-ws.tls.certresolver=stepca
       - traefik.http.routers.netbird-mgmt-ws.service=netbird-mgmt-ws
       - traefik.http.services.netbird-mgmt-ws.loadbalancer.server.port=80
+
       # Management gRPC router
-      - traefik.http.routers.netbird-mgmt-grpc.rule=Host(`<DOMAIN>`) && PathPrefix(`/management.ManagementService/`)
-      - traefik.http.routers.netbird-mgmt-grpc.entrypoints=websecure
+      - traefik.http.routers.netbird-mgmt-grpc.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/management.ManagementService/`)
+      - traefik.http.routers.netbird-mgmt-grpc.entrypoints=services
       - traefik.http.routers.netbird-mgmt-grpc.tls=true
       - traefik.http.routers.netbird-mgmt-grpc.tls.certresolver=stepca
       - traefik.http.routers.netbird-mgmt-grpc.service=netbird-mgmt-grpc
       - traefik.http.services.netbird-mgmt-grpc.loadbalancer.server.port=80
       - traefik.http.services.netbird-mgmt-grpc.loadbalancer.server.scheme=h2c
+
       # OAuth2 router (embedded IdP)
-      - traefik.http.routers.netbird-oauth2.rule=Host(`<DOMAIN>`) && PathPrefix(`/oauth2`)
-      - traefik.http.routers.netbird-oauth2.entrypoints=websecure
+      - traefik.http.routers.netbird-oauth2.rule=Host(`netbird.<DOMAIN>`) && PathPrefix(`/oauth2`)
+      - traefik.http.routers.netbird-oauth2.entrypoints=services
       - traefik.http.routers.netbird-oauth2.tls=true
       - traefik.http.routers.netbird-oauth2.tls.certresolver=stepca
       - traefik.http.routers.netbird-oauth2.service=netbird-oauth2

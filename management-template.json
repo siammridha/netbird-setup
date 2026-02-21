@@ -2,26 +2,26 @@
     "Stuns": [
         {
             "Proto": "udp",
-            "URI": "stun:<DOMAIN>:3478"
+            "URI": "stun:netbird.<DOMAIN>:4478"
         }
     ],
     "Relay": {
-        "Addresses": ["rels://<DOMAIN>:443"],
+        "Addresses": ["rels://netbird.<DOMAIN>:4478/relay"],
         "CredentialsTTL": "24h",
         "Secret": "<NB_AUTH_SECRET>"
     },
     "Signal": {
         "Proto": "https",
-        "URI": "<DOMAIN>:443"
+        "URI": "netbird.<DOMAIN>:4478"
     },
     "Datadir": "/var/lib/netbird",
     "DataStoreEncryptionKey": "<DATASTORE_KEY>",
     "EmbeddedIdP": {
         "Enabled": true,
-        "Issuer": "https://<DOMAIN>/oauth2",
+        "Issuer": "https://netbird.<DOMAIN>:4478/oauth2",
         "DashboardRedirectURIs": [
-            "https://<DOMAIN>/nb-auth",
-            "https://<DOMAIN>/nb-silent-auth"
+            "https://netbird.<DOMAIN>/nb-auth",
+            "https://netbird.<DOMAIN>/nb-silent-auth"
         ]
     }
 }
