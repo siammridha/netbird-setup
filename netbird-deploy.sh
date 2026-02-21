@@ -319,8 +319,6 @@ pull_latest_images() {
     failed=0
 
     for image in \
-        "smallstep/step-ca:latest" \
-        "traefik:latest" \
         "netbirdio/dashboard:latest" \
         "netbirdio/signal:latest" \
         "netbirdio/relay:latest" \
