@@ -61,10 +61,11 @@
 #   ├─ Restore secrets/, step-ca-data/, and management/data if available
 #   └─ Generate fresh secrets and a new CA if no backup is selected
 #
-#   Backups include the following directories:
-#   ├─ secrets/           (nb_auth_secret, datastore_encryption_key, step_ca_password)
-#   ├─ step-ca-data/      (CA certificates and configuration)
-#   └─ management/data    (management service persistent data)
+#   Backups include the following paths:
+#   ├─ step-ca-data/             (CA certificates, configuration, and password file)
+#   ├─ management/nb_auth_secret (NetBird auth secret)
+#   ├─ management/datastore_encryption_key (datastore encryption key)
+#   └─ management/data           (management service persistent data)
 #
 # 🏷️ METADATA
 # ===========
@@ -267,10 +268,9 @@ cleanup_docker_networks_volumes() {
 
 reset_configs_and_data() {
     # Check whether any existing NetBird configuration or data is present
-    if [[ -d "${SETUP_DIR}/secrets" || \
+    if [[ -d "${SETUP_DIR}/step-ca-data" || \
         -f "${SETUP_DIR}/relay.env" || \
         -d "${SETUP_DIR}/management" || \
-        -d "${SETUP_DIR}/step-ca-data" || \
         -f "${SETUP_DIR}/dashboard.env" || \
         -f "${SETUP_DIR}/docker-compose.yml" ]]; then
 
@@ -285,12 +285,13 @@ reset_configs_and_data() {
             progress "Removing existing NetBird configs and data..."
             # Remove all NetBird-managed files and directories
             rm -rf \
-            ${SETUP_DIR}/secrets \
             ${SETUP_DIR}/relay.env \
             ${SETUP_DIR}/management \
             ${SETUP_DIR}/step-ca-data \
             ${SETUP_DIR}/dashboard.env \
             ${SETUP_DIR}/docker-compose.yml
+            # Also clean up any remnant legacy secrets directory
+            rm -rf ${SETUP_DIR}/secrets
             success "NetBird directory reset complete"
         else
             success "Aborted. Existing config and data were not removed."
@@ -396,17 +397,17 @@ find_latest_backup() {
 
 read_secrets() {
     # Load secrets from disk into shell variables, stripping any trailing newlines
-    NB_AUTH_SECRET=$(tr -d '\n\r' < secrets/nb_auth_secret)
-    DATASTORE_KEY=$(tr -d '\n\r' < secrets/datastore_encryption_key)
+    NB_AUTH_SECRET=$(tr -d '\n\r' < management/nb_auth_secret)
+    DATASTORE_KEY=$(tr -d '\n\r' < management/datastore_encryption_key)
 }
 
 generate_secrets() {
     # Create cryptographically secure secrets using OpenSSL; skip if already present
     progress "Generating new cryptographically secure secrets..."
-    mkdir -p secrets
-    [[ ! -f secrets/step_ca_password ]] && openssl rand -base64 32 > secrets/step_ca_password
-    [[ ! -f secrets/nb_auth_secret ]] && openssl rand -base64 32 > secrets/nb_auth_secret
-    [[ ! -f secrets/datastore_encryption_key ]] && openssl rand -base64 32 > secrets/datastore_encryption_key
+    mkdir -p management step-ca-data
+    [[ ! -f step-ca-data/password ]] && openssl rand -base64 32 > step-ca-data/password
+    [[ ! -f management/nb_auth_secret ]] && openssl rand -base64 32 > management/nb_auth_secret
+    [[ ! -f management/datastore_encryption_key ]] && openssl rand -base64 32 > management/datastore_encryption_key
     success "New cryptographically secure secrets generated"
 }
 
@@ -417,14 +418,21 @@ restore_secrets_or_generate() {
     # Attempt to restore secrets from the selected backup archive
     if [[ -n "${latest_backup}" ]]; then
         progress "Restoring secrets from backup..."
-        if [[ $(echo "${backup_contents}" | grep -c 'secrets/') -gt 0 ]]; then
-            tar -xzf "${latest_backup}" secrets/ >/dev/null 2>&1
-            chmod -R 644 secrets
+        mkdir -p management step-ca-data
+
+        if [[ $(echo "${backup_contents}" | grep -c 'management/nb_auth_secret') -gt 0 ]]; then
+            tar -xzf "${latest_backup}" management/nb_auth_secret management/datastore_encryption_key 2>/dev/null || true
+            chmod 644 management/nb_auth_secret management/datastore_encryption_key 2>/dev/null || true
             success "Secrets restored from backup"
         else
-            warn "No secrets directory found in backup archive — generating fresh secrets"
+            warn "No secrets found in backup archive — generating fresh secrets"
             generate_secrets
         fi
+
+        # Fill in any secrets that may still be missing after a partial restore
+        [[ ! -f management/nb_auth_secret ]]           && openssl rand -base64 32 > management/nb_auth_secret
+        [[ ! -f management/datastore_encryption_key ]] && openssl rand -base64 32 > management/datastore_encryption_key
+        [[ ! -f step-ca-data/password ]]               && openssl rand -base64 32 > step-ca-data/password
     else
         # No backup selected; generate all secrets from scratch
         generate_secrets
@@ -683,17 +691,22 @@ backup_data() {
     mkdir -p "${BACKUP_DIR}"
     BAACKUP_FILE="/backups/netbird-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
 
-    # Warn if any expected source directories are missing before creating the archive
+    # Warn if any expected source paths are missing before creating the archive
     progress "Creating configuration and CA backup..."
-    [[ ! -d "secrets" ]] && { warn "secrets/ directory not found — skipping"; }
     [[ ! -d "step-ca-data" ]] && { warn "step-ca-data/ directory not found — skipping"; }
+    [[ ! -f "management/nb_auth_secret" ]] && { warn "management/nb_auth_secret not found — skipping"; }
+    [[ ! -f "management/datastore_encryption_key" ]] && { warn "management/datastore_encryption_key not found — skipping"; }
     [[ ! -d "management/data" ]] && { warn "management/data directory not found — skipping"; }
 
     # Create a compressed archive; excludes ephemeral Step CA directories to keep size small
     tar -czf "${BAACKUP_FILE}" \
     --exclude='step-ca-data/db' \
     --exclude='step-ca-data/templates' \
-    step-ca-data secrets management/data 2>/dev/null || true
+    step-ca-data \
+    management/nb_auth_secret \
+    management/datastore_encryption_key \
+    management/data \
+    2>/dev/null || true
 
     [[ -f "${BAACKUP_FILE}" && -s "${BAACKUP_FILE}" ]] && \
         success "Backup saved ($(du -h "${BAACKUP_FILE}" | cut -f1))"

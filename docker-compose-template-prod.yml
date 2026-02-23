@@ -243,4 +243,4 @@ networks:
 
 secrets:
   step_ca_password:
-    file: ./secrets/step_ca_password
+    file: ./step-ca-data/password
