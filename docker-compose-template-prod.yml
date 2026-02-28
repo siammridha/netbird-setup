@@ -50,7 +50,7 @@ services:
       - LEGO_CA_CERTIFICATES=/certs/root_ca.crt
     command:
       # Logging
-      - --log.level=DEBUG
+      - --log.level=ERROR
 
       # Docker provider
       - --providers.docker=true
@@ -98,7 +98,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "500m"
+        max-size: "10m"
         max-file: "2"
 
   # Signal — netbird.<DOMAIN>:4478 (routed by path)
@@ -134,7 +134,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "500m"
+        max-size: "10m"
         max-file: "2"
 
   # Relay (includes embedded STUN server) — netbird.<DOMAIN>:4478 (routed by path)
@@ -165,7 +165,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "500m"
+        max-size: "10m"
         max-file: "2"
 
   # Management (includes embedded IdP) — netbird.<DOMAIN>:4478 (routed by path)
@@ -185,7 +185,7 @@ services:
     command: [
       "--port", "80",
       "--log-file", "console",
-      "--log-level", "info",
+      "--log-level", "error",
       "--disable-anonymous-metrics=false",
       "--single-account-mode-domain=netbird.selfhosted",
       "--dns-domain=netbird.selfhosted",
@@ -229,7 +229,7 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "500m"
+        max-size: "10m"
         max-file: "2"
 
 volumes:
