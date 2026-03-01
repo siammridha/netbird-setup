@@ -32,6 +32,7 @@ services:
         # Single alias — Traefik receives all traffic for netbird.<DOMAIN>
         aliases:
           - netbird.<DOMAIN>
+          - proxy.<DOMAIN>
     restart: unless-stopped
     depends_on:
       step-ca:
@@ -41,6 +42,7 @@ services:
       - "443:443"       # Dashboard — netbird.<DOMAIN>:443
       - "4478:4478"     # TCP — Management, Signal, Relay
       - "4478:4478/udp" # UDP — STUN
+      - "8888:8888"     # TCP passthrough → mitmproxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./step-ca-data/certs:/certs:ro
@@ -60,10 +62,11 @@ services:
       - --providers.docker.network=netbird
 
       # Entry points
-      - --entrypoints.web.address=:80               # HTTP redirect
+      - --entrypoints.web.address=:80                # HTTP redirect
       - --entrypoints.websecure.address=:443         # Dashboard HTTPS
       - --entrypoints.services.address=:4478         # TCP — Management / Signal / Relay
       - --entrypoints.stun.address=:4478/udp         # UDP — STUN
+      - --entrypoints.mitm.address=:8888             # TCP passthrough — mitmproxy
 
       # HTTP → HTTPS redirect
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
@@ -245,6 +248,50 @@ services:
         max-size: "500m"
         max-file: "2"
 
+# mitmproxy — proxy.<DOMAIN>:443 (Web UI) + <server-ip>:8888 (Proxy)
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    container_name: mitmproxy
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    depends_on:
+      traefik:
+        condition: service_started
+    networks: [netbird]
+    volumes:
+      - ./mitmproxy/mitmproxy-ca.pem:/home/mitmproxy/.mitmproxy/mitmproxy-ca.pem:ro
+    command: [
+      "mitmweb",
+      "--web-host", "0.0.0.0",
+      "--web-port", "8081",
+      "--listen-host", "0.0.0.0",
+      "--listen-port", "8080",
+      "--no-web-open-browser",
+      "--set", "web_password=yourpasswordhere",
+    ]
+    labels:
+      - traefik.enable=true
+
+      # Web UI router — proxy.<DOMAIN>:443
+      - traefik.http.routers.mitmproxy-ui.rule=Host(`proxy.<DOMAIN>`)
+      - traefik.http.routers.mitmproxy-ui.entrypoints=websecure
+      - traefik.http.routers.mitmproxy-ui.tls=true
+      - traefik.http.routers.mitmproxy-ui.tls.certresolver=stepca
+      - traefik.http.routers.mitmproxy-ui.service=mitmproxy-ui
+      - traefik.http.services.mitmproxy-ui.loadbalancer.server.port=8081
+
+      # Proxy — TCP passthrough at :8888 (Traefik does NOT terminate TLS here)
+      - traefik.tcp.routers.mitmproxy-proxy.rule=HostSNI(`*`)
+      - traefik.tcp.routers.mitmproxy-proxy.entrypoints=mitm
+      - traefik.tcp.routers.mitmproxy-proxy.service=mitmproxy-proxy
+      - traefik.tcp.services.mitmproxy-proxy.loadbalancer.server.port=8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "2"
+
 volumes:
   traefik-certs:
     name: traefik-certs
@@ -256,4 +303,4 @@ networks:
 
 secrets:
   step_ca_password:
-    file: ./step-ca-data/password
+    file: step-ca-data/password

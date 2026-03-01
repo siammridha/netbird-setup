@@ -18,7 +18,8 @@
 # ├─ 🧹 Complete Docker cleanup (containers, volumes, networks)
 # ├─ 🔐 Generates cryptographically secure random secrets
 # ├─ 📜 Step CA with ACME provisioner for automated certificate issuance
-# ├─ 🚀 Deploys Management, Signal, Relay, and Dashboard services
+# ├─ 🕵️  mitmproxy CA signed by Step CA intermediate (single trusted root)
+# ├─ 🚀 Deploys Management, Signal, Relay, Dashboard, and mitmproxy services
 # ├─ 🌍 Interactive domain and setup directory configuration
 # ├─ 💾 Smart backup/restore from the 5 most recent backups
 # ├─ 🔄 Template-based configuration generation (dev/prod modes)
@@ -70,10 +71,10 @@
 # 🏷️ METADATA
 # ===========
 # Author:  NetBird Deployment Engineering Team
-# Version: 2.0 — Enhanced UI/UX Edition
+# Version: 2.1 — mitmproxy Step CA Integration
 # License: MIT
 #
-set -euo pipefail # 🚫 Exit immediately on any error, undefined variable, or pipe failure
+# set -euo pipefail # 🚫 Exit immediately on any error, undefined variable, or pipe failure
 
 # =============================================================================
 # 🌈 TERMINAL BEAUTIFICATION & LOGGING SYSTEM
@@ -98,7 +99,7 @@ show_main_banner() {
     echo -e "${CYAN}
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                       🌐 NETBIRD VPN DEPLOYER                        ║
-║                Complete Self-Hosted VPN Solution v2.0                ║
+║                Complete Self-Hosted VPN Solution v2.1                ║
 ║                                                                      ║
 ║     Step CA + Traefik + Embedded OIDC + Management + Signal + Relay  ║
 ╚══════════════════════════════════════════════════════════════════════╝${NC}"
@@ -212,6 +213,7 @@ ${GREEN}IMAGES UPDATED (--update):${NC}
   ${GRAY}netbirdio/signal:latest${NC}
   ${GRAY}netbirdio/relay:latest${NC}
   ${GRAY}netbirdio/management:latest${NC}
+  ${GRAY}mitmproxy/mitmproxy:latest${NC}
 
 ${GREEN}BACKUP LOCATION:${NC}
   /backups/netbird-backup-YYYYMMDD-HHMMSS.tar.gz
@@ -289,7 +291,8 @@ reset_configs_and_data() {
             ${SETUP_DIR}/management \
             ${SETUP_DIR}/step-ca-data \
             ${SETUP_DIR}/dashboard.env \
-            ${SETUP_DIR}/docker-compose.yml
+            ${SETUP_DIR}/docker-compose.yml \
+            ${SETUP_DIR}/mitmproxy
             # Also clean up any remnant legacy secrets directory
             rm -rf ${SETUP_DIR}/secrets
             success "NetBird directory reset complete"
@@ -323,7 +326,8 @@ pull_latest_images() {
         "netbirdio/dashboard:latest" \
         "netbirdio/signal:latest" \
         "netbirdio/relay:latest" \
-        "netbirdio/management:latest"
+        "netbirdio/management:latest" \
+        "mitmproxy/mitmproxy:latest"
     do
         progress "Pulling ${image}..."
         if docker pull "${image}" >/dev/null 2>&1; then
@@ -403,12 +407,24 @@ read_secrets() {
 
 generate_secrets() {
     # Create cryptographically secure secrets using OpenSSL; skip if already present
-    progress "Generating new cryptographically secure secrets..."
-    mkdir -p management step-ca-data
-    [[ ! -f step-ca-data/password ]] && openssl rand -base64 32 > step-ca-data/password
-    [[ ! -f management/nb_auth_secret ]] && openssl rand -base64 32 > management/nb_auth_secret
-    [[ ! -f management/datastore_encryption_key ]] && openssl rand -base64 32 > management/datastore_encryption_key
-    success "New cryptographically secure secrets generated"
+    if [[ ! -f step-ca-data/password ]]; then
+        progress "Generating new cryptographically secure step-ca secrets..."
+        mkdir -p step-ca-data
+        openssl rand -base64 32 > step-ca-data/password
+        success "New cryptographically secure step-ca secrets generated"
+    fi
+    if [[ ! -f management/nb_auth_secret ]]; then
+        progress "Generating new cryptographically secure nb_auth_secret secrets..."
+        mkdir -p management
+        openssl rand -base64 32 > management/nb_auth_secret
+        success "New cryptographically secure nb_auth_secret secrets generated"
+    fi
+    if [[ ! -f management/datastore_encryption_key ]]; then
+        progress "Generating new cryptographically secure datastore_encryption_key secrets..."
+        mkdir -p management
+        openssl rand -base64 32 > management/datastore_encryption_key
+        success "New cryptographically secure datastore_encryption_key secrets generated"
+    fi
 }
 
 restore_secrets_or_generate() {
@@ -426,18 +442,13 @@ restore_secrets_or_generate() {
             success "Secrets restored from backup"
         else
             warn "No secrets found in backup archive — generating fresh secrets"
-            generate_secrets
         fi
-
         # Fill in any secrets that may still be missing after a partial restore
-        [[ ! -f management/nb_auth_secret ]]           && openssl rand -base64 32 > management/nb_auth_secret
-        [[ ! -f management/datastore_encryption_key ]] && openssl rand -base64 32 > management/datastore_encryption_key
-        [[ ! -f step-ca-data/password ]]               && openssl rand -base64 32 > step-ca-data/password
+        generate_secrets
     else
         # No backup selected; generate all secrets from scratch
         generate_secrets
     fi
-
     # Load secrets into variables so templates can reference them
     read_secrets
 }
@@ -454,9 +465,11 @@ init_step_ca() {
     docker compose up -d step-ca >/dev/null 2>&1
 
     # Poll until Step CA reports healthy or the timeout expires
-    progress "Waiting for Step CA health check (10s timeout)..."
-    local timeout=10 elapsed=0
+    # NOTE: docker-compose healthcheck has start_period: 30s so we must wait at least that long
+    progress "Waiting for Step CA health check (60s timeout)..."
+    local timeout=60 elapsed=0
     echo -n "     "
+    docker exec step-ca cat /run/secrets/step_ca_password && echo "[OK - secret mounted]"
     while [[ $elapsed -lt $timeout ]]; do
         if docker compose ps step-ca 2>/dev/null | grep -q "healthy"; then
             echo -e "\n$(success "Step CA is healthy and ready")"
@@ -488,6 +501,55 @@ init_step_ca() {
         sleep 5
         success "ACME provisioner enabled"
     fi
+
+    # Generate mitmproxy CA certificate signed by Step CA intermediate
+    generate_mitmproxy_ca
+}
+
+generate_mitmproxy_ca() {
+    progress "Generating mitmproxy CA certificate from Step CA intermediate..."
+    mkdir -p mitmproxy
+
+    local key="./step-ca-data/secrets/intermediate_ca_key"
+    local crt="./step-ca-data/certs/intermediate_ca.crt"
+    local password_file="./step-ca-data/password"
+    local out="./mitmproxy/mitmproxy-ca.pem"
+
+    # Validate all required files are present on the host (via bind mount)
+    [[ ! -f "$key" ]]           && error "Intermediate key not found at $key"
+    [[ ! -f "$crt" ]]           && error "Intermediate cert not found at $crt"
+    [[ ! -f "$password_file" ]] && error "Step CA password file not found at $password_file"
+
+    # Decrypt the intermediate private key using the step-ca password and write it first
+    # mitmproxy expects: private key first, then certificate
+    openssl pkey \
+        -in "$key" \
+        -passin file:"$password_file" \
+        -out "$out" 2>/dev/null || error "Failed to decrypt intermediate key — check your step-ca password file"
+
+    # Append the intermediate certificate
+    cat "$crt" >> "$out"
+
+    # Harden permissions — private key must not be world-readable
+    chmod 600 "$out"
+
+    success "mitmproxy/mitmproxy-ca.pem generated successfully"
+}
+
+restore_mitmproxy_ca() {
+    local latest_backup="$1"
+    local backup_contents="$2"
+
+    progress "Restoring mitmproxy CA from backup..."
+    if [[ $(echo "${backup_contents}" | grep -c 'mitmproxy/mitmproxy-ca.pem') -gt 0 ]]; then
+        mkdir -p mitmproxy
+        tar -xzf "${latest_backup}" mitmproxy/mitmproxy-ca.pem 2>/dev/null || true
+        chmod 600 mitmproxy/mitmproxy-ca.pem
+        success "mitmproxy/mitmproxy-ca.pem restored from backup"
+    else
+        warn "No mitmproxy CA found in backup — generating from Step CA..."
+        init_step_ca  # generate_mitmproxy_ca is called inside init_step_ca
+    fi
 }
 
 restore_step_ca_data_or_init() {
@@ -501,11 +563,13 @@ restore_step_ca_data_or_init() {
             tar -xzf "${latest_backup}" step-ca-data/ >/dev/null 2>&1
             chown -R 1000:1000 step-ca-data
             success "Step CA data restored from backup"
-            return
         else
             warn "No Step CA data found in backup archive — initializing a new CA"
-            init_step_ca
+            init_step_ca  # generate_mitmproxy_ca is called inside init_step_ca
+            return
         fi
+
+        restore_mitmproxy_ca "${latest_backup}" "${backup_contents}"
     else
         # No backup selected; perform a fresh Step CA initialization
         init_step_ca
@@ -538,7 +602,7 @@ generate_relay_env() {
 generate_dashboard_env() {
     progress "Configuring Dashboard OIDC settings from template..."
 
-    # Substitute domain, auth secret, and datastore key placeholders in the dashboard template
+    # Substitute domain placeholder in the dashboard template
     get_template "dashboard-template.env" | \
     sed -e "s|<DOMAIN>|${DOMAIN}|g" > dashboard.env
     success "dashboard.env generated from template"
@@ -559,7 +623,7 @@ generate_management_config() {
 generate_docker_compose_yml() {
     local mode=$([[ "${DEPLOYMENT_MODE:-}" == "--prod" ]] && echo "prod" || echo "dev")
     progress "Generating docker-compose.yml from ${mode} template..."
-    
+
     # Replace the domain and certificate name placeholder throughout docker-compose template
     get_template "docker-compose-template-${mode}.yml" | \
     sed -e "s|<DOMAIN>|${DOMAIN}|g" \
@@ -673,12 +737,13 @@ setup() {
     generate_docker_compose_yml
 
     # Restore Step CA data from backup or initialize a new CA instance
+    # NOTE: generate_mitmproxy_ca is called inside this function in both paths
     restore_step_ca_data_or_init "$selected_backup" "${backup_contents:-}"
 
     # Restore management service persistent data from backup if available
     restore_management_data_if_any "$selected_backup" "${backup_contents:-}"
 
-    # Uncomment to bring services up immediately after configuration
+    # Bring all remaining services up
     bring_up_services
 }
 
@@ -697,6 +762,7 @@ backup_data() {
     [[ ! -f "management/nb_auth_secret" ]] && { warn "management/nb_auth_secret not found — skipping"; }
     [[ ! -f "management/datastore_encryption_key" ]] && { warn "management/datastore_encryption_key not found — skipping"; }
     [[ ! -d "management/data" ]] && { warn "management/data directory not found — skipping"; }
+    [[ ! -f "mitmproxy/mitmproxy-ca.pem" ]] && { warn "mitmproxy/mitmproxy-ca.pem not found — skipping"; }
 
     # Create a compressed archive; excludes ephemeral Step CA directories to keep size small
     tar -czf "${BAACKUP_FILE}" \
@@ -706,6 +772,7 @@ backup_data() {
     management/nb_auth_secret \
     management/datastore_encryption_key \
     management/data \
+    mitmproxy/mitmproxy-ca.pem \
     2>/dev/null || true
 
     [[ -f "${BAACKUP_FILE}" && -s "${BAACKUP_FILE}" ]] && \
@@ -736,10 +803,11 @@ print_service_status() {
 
 print_access_info() {
     echo -e "${CYAN}  🌐 ACCESS PORTAL${NC}"
-    echo -e "${BLUE}    Dashboard:          https://${DOMAIN}${NC}"
+    echo -e "${BLUE}    Dashboard:          https://netbird.${DOMAIN}${NC}"
+    echo -e "${BLUE}    mitmproxy Web UI:   https://proxy.${DOMAIN}${NC}"
     [ "${DEPLOYMENT_MODE:-}" == "--dev" ] && \
     echo -e "${BLUE}    Traefik Dashboard:  https://traefik.${DOMAIN}${NC}"
-    echo -e "${BLUE}    Management API:     https://${DOMAIN}/api${NC}\n"
+    echo -e "${BLUE}    Management API:     https://netbird.${DOMAIN}/api${NC}\n"
 }
 
 print_control_panel() {
@@ -757,13 +825,8 @@ print_file_locations() {
     echo -e "${GRAY}    relay.env           → ./relay.env${NC}"
     echo -e "${GRAY}    dashboard.env       → ./dashboard.env${NC}"
     echo -e "${GRAY}    management.json     → ./management/config.json${NC}"
-    echo -e "${GRAY}    Root CA certificate → ${SETUP_DIR}/step-ca-data/certs/root_ca.crt${NC}\n"
-}
-
-print_backup_info() {
-    echo -e "${CYAN}  💾 BACKUP ARCHIVE${NC}"
-    echo -e "${GREEN}    📦 Location: ${BAACKUP_FILE}${NC}"
-    echo -e "${GRAY}    🔍 Verify:   tar -tzf \"${BAACKUP_FILE}\"${NC}\n"
+    echo -e "${GRAY}    Root CA certificate → ${SETUP_DIR}/step-ca-data/certs/root_ca.crt${NC}"
+    echo -e "${GRAY}    mitmproxy CA        → ${SETUP_DIR}/mitmproxy/mitmproxy-ca.pem${NC}\n"
 }
 
 print_logs_commant() {
@@ -773,7 +836,8 @@ print_logs_commant() {
     echo -e "${GRAY}    Signal:      docker compose -f $PWD/docker-compose.yml logs signal${NC}"
     echo -e "${GRAY}    Dashboard:   docker compose -f $PWD/docker-compose.yml logs dashboard${NC}"
     echo -e "${GRAY}    Management:  docker compose -f $PWD/docker-compose.yml logs management${NC}"
-    echo -e "${GRAY}    Traefik:     docker compose -f $PWD/docker-compose.yml logs traefik${NC}\n"
+    echo -e "${GRAY}    Traefik:     docker compose -f $PWD/docker-compose.yml logs traefik${NC}"
+    echo -e "${GRAY}    mitmproxy:   docker compose -f $PWD/docker-compose.yml logs mitmproxy${NC}\n"
 }
 
 tail_initial_logs() {
@@ -784,6 +848,7 @@ tail_initial_logs() {
     docker compose logs management
     docker compose logs traefik
     docker compose logs step-ca
+    docker compose logs mitmproxy
 }
 
 # =============================================================================
@@ -867,7 +932,8 @@ main() {
     print_logs_commant
 
     echo -e "${GREEN}  ✨ NetBird VPN is now ${MAGENTA}LIVE${GREEN} on ${MAGENTA}${DOMAIN}${GREEN}!${NC}"
-    echo -e "${YELLOW}  🔐 Be sure to trust the Root CA certificate on all clients to enable proper TLS operation.${NC}"
+    echo -e "${YELLOW}  🔐 Trust the Root CA on all clients: ${GRAY}${SETUP_DIR}/step-ca-data/certs/root_ca.crt${NC}"
+    echo -e "${YELLOW}  🕵️  Configure your device proxy to ${MAGENTA}<server-ip>:8888${YELLOW} to route traffic through mitmproxy.${NC}\n"
 
     # Uncomment the line below to stream initial service logs after deployment
     # tail_initial_logs
